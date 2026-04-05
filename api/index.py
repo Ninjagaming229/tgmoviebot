@@ -46,22 +46,20 @@ async def lifespan(app: FastAPI):
         logger.critical(f"❌ Config error: {e}")
         raise
 
-    # 2. MongoDB ping
+    # 2. MongoDB ping (warn only — don't crash)
     try:
         mongo = get_mongo_client()
         await mongo.admin.command("ping")
         logger.info("✅ MongoDB connected")
     except Exception as e:
-        logger.critical(f"❌ MongoDB error: {e}")
-        raise
+        logger.error(f"❌ MongoDB error: {e} — will retry on first request")
 
-    # 3. Pyrogram client connect
+    # 3. Pyrogram client connect (warn only — don't crash)
     try:
         client = await get_client()
         logger.info("✅ Pyrogram connected")
     except Exception as e:
-        logger.critical(f"❌ Pyrogram error: {e}")
-        raise
+        logger.error(f"❌ Pyrogram error: {e} — will retry on first request")
 
     # 4. Register webhook (warn only — don't block startup)
     try:
