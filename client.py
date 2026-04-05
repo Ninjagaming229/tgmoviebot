@@ -1,7 +1,6 @@
 """
 client.py — TeleCMS FileStore Pro
-Pyrogram client singleton manager.
-StringSession သုံး — cold start တိုင်း AUTH_KEY_UNREGISTERED မဖြစ်အောင်။
+Pyrogram client singleton — StringSession သုံး။
 """
 import logging
 import httpx
@@ -15,29 +14,24 @@ _client: Client | None = None
 
 
 async def get_client() -> Client:
-    """
-    Pyrogram client singleton ကို return ဆိုသည်။
-    STRING_SESSION ကို Vercel env var မှ ဖတ်ပြီး session reuse လုပ်သည်။
-    Cold start တိုင်း auth key အသစ် မဆောက်တော့ဘဲ registered session သုံးသည်။
-    """
     global _client
 
     if _client is None or not _client.is_connected:
         logger.info("🔌 Pyrogram client connecting...")
 
-        session = config.STRING_SESSION  # Vercel env မှ
+        session = config.STRING_SESSION
 
         if session:
-            # StringSession mode — registered session reuse
+            # StringSession mode — session_string parameter သုံး (filename မဟုတ်)
             _client = Client(
-                name=session,
+                name="telecms_bot",
                 api_id=config.API_ID,
                 api_hash=config.API_HASH,
+                session_string=session,
                 no_updates=True,
             )
         else:
-            # Fallback: bot_token + in_memory (local dev)
-            logger.warning("⚠️ STRING_SESSION မရှိ — in_memory mode သုံးသည် (local only)")
+            logger.warning("⚠️ STRING_SESSION မရှိ — bot_token mode (local dev only)")
             _client = Client(
                 name="telecms_bot",
                 api_id=config.API_ID,
@@ -86,7 +80,6 @@ async def setup_webhook() -> dict:
 
 
 async def get_bot_info() -> tuple[int, str]:
-    """(bot_id, bot_username) ကို return ဆိုသည်"""
     client = await get_client()
     me = await client.get_me()
     return me.id, me.username
