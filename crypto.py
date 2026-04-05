@@ -42,6 +42,7 @@ def decode_content_id(encoded: str) -> str | None:
     Signature မမှန်လျှင် None return ဆိုသည်。
     """
     try:
+        encoded = encoded.strip()  # URL/whitespace strip
         # Base64 padding ပြန်ထည့်သည်
         padding = 4 - (len(encoded) % 4)
         if padding != 4:

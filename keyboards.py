@@ -154,6 +154,10 @@ def kb_edit_content(content_id: str, content_type: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Status ပြောင်းမည်",
                                  callback_data=f"edit_status_{content_id}"),
         ])
+        buttons.append([
+            InlineKeyboardButton("🗑️ Episode ဖျက်မည်",
+                                 callback_data=f"del_ep_list_{content_id}"),
+        ])
     else:
         buttons.append([
             InlineKeyboardButton("🔗 Video Link ပြောင်းမည်",
@@ -162,6 +166,18 @@ def kb_edit_content(content_id: str, content_type: str) -> InlineKeyboardMarkup:
     buttons.append([
         InlineKeyboardButton("◀️ ပြန်သွားမည်", callback_data=f"view_content_{content_id}")
     ])
+    return InlineKeyboardMarkup(buttons)
+
+
+def kb_episode_list_delete(episodes: list, content_id: str) -> InlineKeyboardMarkup:
+    """Episode list — ဖျက်ချင်တာ ရွေးပါ"""
+    buttons = []
+    for i, ep in enumerate(episodes):
+        name = ep.get("name", f"EP{i+1}")[:30]
+        buttons.append([
+            InlineKeyboardButton(f"🗑️ {name}", callback_data=f"del_ep_{content_id}_{i}")
+        ])
+    buttons.append([InlineKeyboardButton("◀️ ပြန်သွားမည်", callback_data=f"edit_content_{content_id}")])
     return InlineKeyboardMarkup(buttons)
 
 

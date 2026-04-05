@@ -21,6 +21,7 @@ from keyboards import (
     kb_content_list, kb_content_actions, kb_series_status, kb_episode_actions,
     kb_cancel, kb_skip_or_cancel, kb_confirm_delete, kb_edit_content,
     kb_watch_now, kb_post_channel_confirm, kb_channel_select,
+    kb_episode_list_delete,
 )
 from crypto import encode_content_id
 from helpers import format_content_info, STATUS_DISPLAY
@@ -435,6 +436,24 @@ async def handle_admin_callback(client: Client, cq: dict) -> None:
                 chat_id, msg_id, "❌ Content မတွေ့ပါ!", reply_markup=kb_admin_cms()
             )
             return
+
+        # POST_SELECT_CH state မှာ ဆိုရင် post confirm ပြ
+        state_doc  = await get_admin_state(user_id)
+        state_data = state_doc.get("data", {})
+        if state_doc.get("state") == POST_SELECT_CH and state_data.get("channel_id"):
+            channel_id   = state_data["channel_id"]
+            channel_name = state_data.get("channel_name", str(channel_id))
+            await set_admin_state(user_id, IDLE, {})
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"📢 **Post Confirm**\n\n"
+                f"Channel: **{channel_name}** (`{channel_id}`)\n"
+                f"Content: **{content.get('title')}**\n\nPost တင်မည်လား?",
+                reply_markup=kb_post_channel_confirm(channel_id, content_id),
+            )
+            return
+
+        # Normal CMS view
         await client.edit_message_text(
             chat_id, msg_id,
             format_content_info(content),
@@ -593,6 +612,46 @@ async def handle_admin_callback(client: Client, cq: dict) -> None:
             chat_id, msg_id,
             "📢 **Post တင်မည့် Channel ရွေးပါ:**",
             reply_markup=kb_channel_select(channels, f"post_c_{content_id}"),
+        )
+
+    elif data.startswith("del_ep_list_"):
+        content_id = data.removeprefix("del_ep_list_")
+        content    = await get_content(content_id)
+        if not content:
+            await _ack(client, cq_id, "❌ Content မတွေ့ပါ!", alert=True)
+            return
+        episodes = content.get("episodes", [])
+        if not episodes:
+            await _ack(client, cq_id, "Episode မရှိသေးပါ", alert=True)
+            return
+        await client.edit_message_text(
+            chat_id, msg_id,
+            f"🗑️ **ဖျက်မည့် Episode ရွေးပါ:**\n_(Content: {content.get('title')})_",
+            reply_markup=kb_episode_list_delete(episodes, content_id),
+        )
+
+    elif data.startswith("del_ep_"):
+        # Format: del_ep_{content_id}_{index}
+        rest       = data.removeprefix("del_ep_")
+        sep        = rest.rindex("_")
+        content_id = rest[:sep]
+        ep_index   = int(rest[sep + 1:])
+        content    = await get_content(content_id)
+        if not content:
+            await _ack(client, cq_id, "❌ Content မတွေ့ပါ!", alert=True)
+            return
+        episodes = content.get("episodes", [])
+        if ep_index >= len(episodes):
+            await _ack(client, cq_id, "❌ Episode မတွေ့ပါ!", alert=True)
+            return
+        removed = episodes.pop(ep_index)
+        await update_content(content_id, {"episodes": episodes})
+        content = await get_content(content_id)
+        await client.edit_message_text(
+            chat_id, msg_id,
+            f"✅ **'{removed.get('name', 'Episode')}' ဖျက်ပြီးပါပြီ!**\n\n"
+            f"{format_content_info(content)}",
+            reply_markup=kb_content_actions(content_id),
         )
 
     elif data.startswith("sel_ch_"):
@@ -842,7 +901,24 @@ async def _add_forcesub_channel_by_input(
 
 
 async def _get_bot_channels(client) -> list[dict]:
-    """Bot က admin ဖြစ်တဲ့ channels တွေကို list ထုတ်သည်"""
+    """
+    Bot က admin ဖြစ်တဲ့ channels တွေကို list ထုတ်သည်။
+    MongoDB မှာ 5 မိနစ် cache သိမ်းထားသည် — get_dialogs() တိုင်း မခေါ်ဘဲ fast ဖြစ်မည်။
+    """
+    from datetime import datetime, timedelta
+
+    # Cache check
+    try:
+        db = await get_db()
+        cache_doc = await db.settings.find_one({"key": "_channel_cache"})
+        if cache_doc:
+            cached_at = cache_doc.get("updated_at", datetime.min)
+            if datetime.utcnow() - cached_at < timedelta(minutes=5):
+                return cache_doc.get("value", [])
+    except Exception:
+        pass
+
+    # Cache miss — fetch fresh
     channels = []
     try:
         async for dialog in client.get_dialogs():
@@ -856,8 +932,19 @@ async def _get_bot_channels(client) -> list[dict]:
                 except Exception:
                     pass
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"get_dialogs error: {e}")
+        logger.warning(f"get_dialogs error: {e}")
+
+    # Save cache
+    try:
+        db = await get_db()
+        await db.settings.update_one(
+            {"key": "_channel_cache"},
+            {"$set": {"value": channels, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+
     return channels
 
 

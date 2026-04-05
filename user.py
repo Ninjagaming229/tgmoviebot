@@ -198,36 +198,56 @@ async def _deliver_content(
 
 
 async def _deliver_movie(client: Client, chat_id: int, content: dict) -> list[int]:
-    """Movie content ပေးပို့သည်"""
-    sent_ids:  list[int] = []
-    title      = content.get("title", "Movie")
-    review     = content.get("review", "")
-    video_link = content.get("video_link", "")
+    """Movie content ပေးပို့သည် (poster + video)"""
+    sent_ids:   list[int] = []
+    title       = content.get("title", "Movie")
+    review      = content.get("review", "")
+    video_link  = content.get("video_link", "")
+    poster_url  = content.get("poster_url", "")
 
     caption = f"🎬 **{title}**"
     if review:
         caption += f"\n\n📝 {review}"
 
     if is_telegram_private_link(video_link):
+        # Private channel file — poster ကို ဦးစွာ ပေးပို့ပြီး copy_message ထပ်ပို့
         parsed = parse_telegram_link(video_link)
         if parsed:
             from_chat_id, from_msg_id = parsed
+            # Poster ပို့
+            if poster_url:
+                try:
+                    poster_msg = await client.send_photo(chat_id, photo=poster_url, caption=caption)
+                    sent_ids.append(poster_msg.id)
+                    caption = ""  # copy_message မှာ caption ထပ်မထည့်
+                except Exception:
+                    pass
+            # Video copy
             try:
                 sent = await client.copy_message(
                     chat_id=chat_id,
                     from_chat_id=from_chat_id,
                     message_id=from_msg_id,
-                    caption=caption,
+                    caption=caption if caption else None,
                 )
                 sent_ids.append(sent.id)
                 return sent_ids
             except Exception as e:
                 logger.warning(f"copy_message failed: {e}, falling back to button")
 
-    # External link or fallback
+    # External link — poster + button
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("▶️ ကြည့်ရန်", url=video_link)
     ]])
+    if poster_url:
+        try:
+            sent = await client.send_photo(chat_id, photo=poster_url,
+                                           caption=caption, reply_markup=keyboard)
+            sent_ids.append(sent.id)
+            return sent_ids
+        except Exception:
+            pass
+    # Fallback: text only
     sent = await client.send_message(chat_id, caption, reply_markup=keyboard)
     sent_ids.append(sent.id)
     return sent_ids
@@ -241,14 +261,23 @@ async def _deliver_series(client: Client, chat_id: int, content: dict) -> list[i
     episodes = content.get("episodes", [])
     status   = content.get("status", "ongoing")
 
-    # Header message
+    # Header message (poster + info)
     header = f"📺 **{title}**"
     if review:
         header += f"\n\n📝 {review}"
     header += format_series_footer(status, episodes)
 
-    header_msg = await client.send_message(chat_id, header)
-    sent_ids.append(header_msg.id)
+    poster_url = content.get("poster_url", "")
+    if poster_url:
+        try:
+            header_msg = await client.send_photo(chat_id, photo=poster_url, caption=header)
+            sent_ids.append(header_msg.id)
+        except Exception:
+            header_msg = await client.send_message(chat_id, header)
+            sent_ids.append(header_msg.id)
+    else:
+        header_msg = await client.send_message(chat_id, header)
+        sent_ids.append(header_msg.id)
 
     # Episodes တစ်ခုချင်း ပေးပို့သည်
     for i, episode in enumerate(episodes, 1):

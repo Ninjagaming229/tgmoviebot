@@ -40,6 +40,13 @@ async def get_db() -> AsyncIOMotorDatabase:
         logger.info("🗄️ MongoDB connecting...")
         client = get_mongo_client()
         _database = client[config.DB_NAME]
+        # user_messages collection TTL index (30 days auto-expire)
+        try:
+            await _database.user_messages.create_index(
+                "created_at", expireAfterSeconds=30 * 24 * 3600
+            )
+        except Exception:
+            pass
         logger.info("✅ MongoDB connected!")
     return _database
 
