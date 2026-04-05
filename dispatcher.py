@@ -64,18 +64,15 @@ async def dispatch_update(client: Client, update: dict[str, Any]) -> None:
 
             is_admin = _is_admin(user_id)
 
-            # /start command
+            # /start — admin/user နှစ်ဦးစလုံး welcome + deep link flow
             if text.startswith("/start"):
-                if is_admin:
-                    # Admin /start → Admin main menu
-                    await handle_admin_command(client, msg)
-                else:
-                    await handle_start(client, msg)
+                await handle_start(client, msg)
                 return
 
-            # /admin command (admins only)
-            if is_admin and text.startswith("/admin"):
-                await handle_admin_command(client, msg)
+            # /admin — admin panel သာ (admins only)
+            if text.startswith("/admin"):
+                if is_admin:
+                    await handle_admin_command(client, msg)
                 return
 
             # Other commands — ignore for non-admins

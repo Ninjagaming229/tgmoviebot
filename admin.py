@@ -20,7 +20,7 @@ from keyboards import (
     kb_admin_main, kb_admin_cms, kb_admin_storage, kb_admin_forcesub,
     kb_content_list, kb_content_actions, kb_series_status, kb_episode_actions,
     kb_cancel, kb_skip_or_cancel, kb_confirm_delete, kb_edit_content,
-    kb_watch_now, kb_post_channel_confirm,
+    kb_watch_now, kb_post_channel_confirm, kb_channel_select,
 )
 from crypto import encode_content_id
 from helpers import format_content_info, STATUS_DISPLAY
@@ -330,13 +330,20 @@ async def handle_admin_callback(client: Client, cq: dict) -> None:
         )
 
     elif data == "add_storage_ch":
-        await set_admin_state(user_id, ADD_STORAGE_CH)
+        channels = await _get_bot_channels(client)
+        if not channels:
+            await client.edit_message_text(
+                chat_id, msg_id,
+                "🗄️ **Storage Channel ထည့်မည်**\n\n"
+                "❌ Bot ကို Admin ထားထားတဲ့ Channel မတွေ့ပါ။\n"
+                "Channel ထဲ Bot ကို Admin ထည့်ပြီး ထပ်စမ်းပါ။",
+                reply_markup=kb_cancel(),
+            )
+            return
         await client.edit_message_text(
             chat_id, msg_id,
-            "🗄️ **Storage Channel ထည့်မည်**\n\n"
-            "Channel ID (`-100xxxxxxx`) သို့မဟုတ် `@username` ထည့်ပါ:\n\n"
-            "_(Bot ကို Channel Admin ထားပြီး ဖြစ်ရမည်)_",
-            reply_markup=kb_cancel(),
+            "🗄️ **Storage Channel အဖြစ် ထည့်မည့် Channel ရွေးပါ:**",
+            reply_markup=kb_channel_select(channels, "storage"),
         )
 
     elif data.startswith("del_storage_"):
@@ -360,13 +367,20 @@ async def handle_admin_callback(client: Client, cq: dict) -> None:
         )
 
     elif data == "add_forcesub_ch":
-        await set_admin_state(user_id, ADD_FORCESUB_CH)
+        channels = await _get_bot_channels(client)
+        if not channels:
+            await client.edit_message_text(
+                chat_id, msg_id,
+                "🔒 **ForceSub Channel ထည့်မည်**\n\n"
+                "❌ Bot ကို Admin ထားထားတဲ့ Channel မတွေ့ပါ။\n"
+                "Channel ထဲ Bot ကို Admin ထည့်ပြီး ထပ်စမ်းပါ။",
+                reply_markup=kb_cancel(),
+            )
+            return
         await client.edit_message_text(
             chat_id, msg_id,
-            "🔒 **ForceSub Channel ထည့်မည်**\n\n"
-            "Channel ID (`-100xxxxxxx`) သို့မဟုတ် `@username` ထည့်ပါ:\n\n"
-            "_(Public channel ဖြစ်ရမည်)_",
-            reply_markup=kb_cancel(),
+            "🔒 **ForceSub Channel အဖြစ် ထည့်မည့် Channel ရွေးပါ:**",
+            reply_markup=kb_channel_select(channels, "forcesub"),
         )
 
     elif data.startswith("del_forcesub_"):
@@ -546,24 +560,122 @@ async def handle_admin_callback(client: Client, cq: dict) -> None:
 
     # ── Public Channel Posting ────────────────────────────────────────────────
     elif data == "admin_post":
+        channels = await _get_bot_channels(client)
+        if not channels:
+            await client.edit_message_text(
+                chat_id, msg_id,
+                "📢 **Channel Post**\n\n"
+                "❌ Bot ကို Admin ထားထားတဲ့ Channel မတွေ့ပါ။\n"
+                "Channel ထဲ Bot ကို Admin ထည့်ပြီး ထပ်စမ်းပါ။",
+                reply_markup=kb_cancel(),
+            )
+            return
         await set_admin_state(user_id, POST_SELECT_CH, {})
         await client.edit_message_text(
             chat_id, msg_id,
-            "📢 **Channel Post**\n\n"
-            "Post တင်မည့် Channel ID ထည့်ပါ:\n"
-            "_(Format: `-100xxxxxxxx` သို့မဟုတ် `@username`)_",
-            reply_markup=kb_cancel(),
+            "📢 **Post တင်မည့် Channel ရွေးပါ:**",
+            reply_markup=kb_channel_select(channels, "post"),
         )
 
     elif data.startswith("post_init_"):
         content_id = data.removeprefix("post_init_")
+        channels   = await _get_bot_channels(client)
+        if not channels:
+            await client.edit_message_text(
+                chat_id, msg_id,
+                "📢 **Post တင်မည်**\n\n"
+                "❌ Bot ကို Admin ထားထားတဲ့ Channel မတွေ့ပါ။",
+                reply_markup=kb_cancel(),
+            )
+            return
         await set_admin_state(user_id, POST_SELECT_CH, {"content_id": content_id})
         await client.edit_message_text(
             chat_id, msg_id,
-            "📢 **Post တင်မည်**\n\n"
-            "Channel ID ထည့်ပါ:\n_(Format: `-100xxxxxxxx` သို့မဟုတ် `@username`)_",
-            reply_markup=kb_cancel(),
+            "📢 **Post တင်မည့် Channel ရွေးပါ:**",
+            reply_markup=kb_channel_select(channels, f"post_c_{content_id}"),
         )
+
+    elif data.startswith("sel_ch_"):
+        # Format: sel_ch_{action}_{channel_id}
+        # action: post, storage, forcesub, post_c_{content_id}
+        rest = data.removeprefix("sel_ch_")
+        # Last token is channel_id, everything before is action
+        parts = rest.rsplit("_", 1)
+        action     = parts[0]  # e.g. "post", "storage", "forcesub", "post_c_<id>"
+        channel_id = int(parts[1])
+
+        try:
+            channel_chat = await client.get_chat(channel_id)
+        except Exception as e:
+            await _ack(client, cq_id, f"❌ Channel info ရလာမရ: {e}", alert=True)
+            return
+
+        if action == "storage":
+            invite_link = None
+            try:
+                invite_link = await client.export_chat_invite_link(channel_id)
+            except Exception:
+                pass
+            await add_storage_channel(channel_id, channel_chat.title, invite_link)
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"✅ **Storage Channel ထည့်ပြီးပါပြီ!**\n"
+                f"📢 {channel_chat.title} (`{channel_id}`)",
+                reply_markup=kb_admin_main(),
+            )
+
+        elif action == "forcesub":
+            username    = getattr(channel_chat, "username", None)
+            invite_link = None
+            try:
+                invite_link = await client.export_chat_invite_link(channel_id)
+            except Exception:
+                pass
+            await add_forcesub_channel(channel_id, channel_chat.title, username, invite_link)
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"✅ **ForceSub Channel ထည့်ပြီးပါပြီ!**\n"
+                f"📢 {channel_chat.title} (`{channel_id}`)",
+                reply_markup=kb_admin_main(),
+            )
+
+        elif action == "post":
+            # Channel ရွေးပြီး — content ရွေးရန် list ပြ
+            state_doc  = await get_admin_state(user_id)
+            state_data = state_doc.get("data", {})
+            state_data["channel_id"]   = channel_id
+            state_data["channel_name"] = channel_chat.title
+            await set_admin_state(user_id, POST_SELECT_CH, state_data)
+            total    = await count_content()
+            contents = await get_all_content(limit=10)
+            if not contents:
+                await client.edit_message_text(
+                    chat_id, msg_id,
+                    "❌ Content မရှိသေးပါ! CMS မှ ထည့်ပါ:",
+                    reply_markup=kb_admin_cms(),
+                )
+                return
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"📋 **Content ရွေးပါ**\n_(Channel: {channel_chat.title})_",
+                reply_markup=kb_content_list(contents, 0, total),
+            )
+
+        elif action.startswith("post_c_"):
+            # Content ရွေးပြီး channel ရွေးတာ — confirm ပြ
+            content_id = action.removeprefix("post_c_")
+            content    = await get_content(content_id)
+            if not content:
+                await _ack(client, cq_id, "❌ Content မတွေ့ပါ!", alert=True)
+                return
+            await set_admin_state(user_id, IDLE, {})
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"📢 **Post Confirm**\n\n"
+                f"Channel: **{channel_chat.title}** (`{channel_id}`)\n"
+                f"Content: **{content.get('title')}**\n\nPost တင်မည်လား?",
+                reply_markup=kb_post_channel_confirm(channel_id, content_id),
+            )
 
     elif data.startswith("confirm_post_"):
         # Format: confirm_post_{channel_id}_{content_id}
@@ -727,6 +839,26 @@ async def _add_forcesub_channel_by_input(
         )
     except Exception as e:
         await client.send_message(chat_id, f"❌ Error: `{e}`\nထပ်မံကြိုးစားပါ:")
+
+
+async def _get_bot_channels(client) -> list[dict]:
+    """Bot က admin ဖြစ်တဲ့ channels တွေကို list ထုတ်သည်"""
+    channels = []
+    try:
+        async for dialog in client.get_dialogs():
+            chat = dialog.chat
+            if chat.type.name in ("CHANNEL", "SUPERGROUP"):
+                try:
+                    member = await client.get_chat_member(chat.id, "me")
+                    status = str(member.status).lower()
+                    if "admin" in status or "creator" in status:
+                        channels.append({"id": chat.id, "title": chat.title or str(chat.id)})
+                except Exception:
+                    pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"get_dialogs error: {e}")
+    return channels
 
 
 async def _handle_post_channel_input(

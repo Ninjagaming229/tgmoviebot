@@ -175,6 +175,19 @@ def kb_post_channel_confirm(channel_id: int, content_id: str) -> InlineKeyboardM
     ])
 
 
+def kb_channel_select(channels: list, action: str = "post") -> InlineKeyboardMarkup:
+    """Bot admin ဖြစ်တဲ့ channels list ကို buttons အဖြစ် ပြသည်"""
+    buttons = []
+    for ch in channels:
+        ch_id   = ch["id"]
+        name    = ch["title"][:35]
+        buttons.append([
+            InlineKeyboardButton(f"📢 {name}", callback_data=f"sel_ch_{action}_{ch_id}")
+        ])
+    buttons.append([InlineKeyboardButton("❌ ပယ်ဖျက်မည်", callback_data="cancel")])
+    return InlineKeyboardMarkup(buttons)
+
+
 # ════════════════════════════════════════════════════════════════
 # User Keyboards
 # ════════════════════════════════════════════════════════════════

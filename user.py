@@ -48,10 +48,16 @@ async def handle_start(client: Client, msg: dict) -> None:
 
     parts = text.strip().split(maxsplit=1)
     if len(parts) > 1:
+        # Deep link ရှိလျှင် — admin ဆိုရင်လည်း content ကြည့်နိုင်သည်
         content_hash = parts[1].strip()
         await _handle_deep_link(client, msg, user_id, chat_id, content_hash)
     else:
-        await _send_welcome(client, chat_id)
+        # Deep link မရှိ — admin ဆိုရင် admin panel၊ user ဆိုရင် welcome
+        if user_id in config.ADMIN_IDS:
+            from admin import handle_admin_command
+            await handle_admin_command(client, msg)
+        else:
+            await _send_welcome(client, chat_id)
 
 
 async def _send_welcome(client: Client, chat_id: int) -> None:
