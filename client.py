@@ -1,7 +1,7 @@
 """
 client.py — TeleCMS FileStore Pro
 Pyrogram client singleton manager.
-Vercel warm instance တွင် connection ကို reuse လုပ်သည်။
+StringSession သုံး — cold start တိုင်း AUTH_KEY_UNREGISTERED မဖြစ်အောင်။
 """
 import logging
 import httpx
@@ -11,27 +11,42 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-# Global client instance — serverless warm lambda တွင် persist ဖြစ်သည်
 _client: Client | None = None
 
 
 async def get_client() -> Client:
     """
     Pyrogram client singleton ကို return ဆိုသည်။
-    Connection မရှိလျှင် / ပြတ်သွားလျှင် reconnect လုပ်သည်။
+    STRING_SESSION ကို Vercel env var မှ ဖတ်ပြီး session reuse လုပ်သည်။
+    Cold start တိုင်း auth key အသစ် မဆောက်တော့ဘဲ registered session သုံးသည်။
     """
     global _client
 
     if _client is None or not _client.is_connected:
         logger.info("🔌 Pyrogram client connecting...")
-        _client = Client(
-            name="telecms_bot",
-            api_id=config.API_ID,
-            api_hash=config.API_HASH,
-            bot_token=config.BOT_TOKEN,
-            in_memory=True,     # RAM ထဲသာ session သိမ်းသည်
-            no_updates=True,    # Webhook mode — polling မဟုတ်
-        )
+
+        session = config.STRING_SESSION  # Vercel env မှ
+
+        if session:
+            # StringSession mode — registered session reuse
+            _client = Client(
+                name=session,
+                api_id=config.API_ID,
+                api_hash=config.API_HASH,
+                no_updates=True,
+            )
+        else:
+            # Fallback: bot_token + in_memory (local dev)
+            logger.warning("⚠️ STRING_SESSION မရှိ — in_memory mode သုံးသည် (local only)")
+            _client = Client(
+                name="telecms_bot",
+                api_id=config.API_ID,
+                api_hash=config.API_HASH,
+                bot_token=config.BOT_TOKEN,
+                in_memory=True,
+                no_updates=True,
+            )
+
         await _client.connect()
         me = await _client.get_me()
         logger.info(f"✅ Connected as @{me.username} (ID: {me.id})")
@@ -40,11 +55,7 @@ async def get_client() -> Client:
 
 
 async def setup_webhook() -> dict:
-    """
-    Telegram Webhook ကို set လုပ်သည်။
-    chat_member updates ပါ enable ထားသည် (auto-delete feature အတွက်)。
-    WEBHOOK_URL နှင့် WEBHOOK_SECRET ကို config မှ ဖတ်သည်。
-    """
+    """Telegram Webhook set လုပ်သည်"""
     client = await get_client()
     webhook_url = f"{config.WEBHOOK_URL}/webhook"
     logger.info(f"🔗 Setting webhook → {webhook_url}")
@@ -58,8 +69,8 @@ async def setup_webhook() -> dict:
                 "allowed_updates": [
                     "message",
                     "callback_query",
-                    "chat_member",      # User leave detect
-                    "my_chat_member",   # Bot kick detect
+                    "chat_member",
+                    "my_chat_member",
                 ],
                 "drop_pending_updates": False,
             },
@@ -67,15 +78,15 @@ async def setup_webhook() -> dict:
         result = resp.json()
 
     if result.get("ok"):
-        logger.info("✅ Webhook set successfully!")
+        logger.info("✅ Webhook set!")
     else:
-        logger.error(f"❌ Webhook setup failed: {result}")
+        logger.error(f"❌ Webhook failed: {result}")
 
     return result
 
 
 async def get_bot_info() -> tuple[int, str]:
-    """(bot_id, bot_username) tuple ကို return ဆိုသည်"""
+    """(bot_id, bot_username) ကို return ဆိုသည်"""
     client = await get_client()
     me = await client.get_me()
     return me.id, me.username

@@ -30,8 +30,10 @@ class Config:
     WEBHOOK_URL:    str = os.environ.get("WEBHOOK_URL", "").rstrip("/")
     WEBHOOK_SECRET: str = os.environ.get("WEBHOOK_SECRET", "")
 
+    # ── Pyrogram StringSession ────────────────────────────────────
+    STRING_SESSION: str = os.environ.get("STRING_SESSION", "")
+
     # ── Security ──────────────────────────────────────────────────
-    # HMAC link signing အတွက် — မပြောင်းလဲစေရ (link တွေ invalid ဖြစ်သွားမည်)
     SECRET_KEY: str = os.environ.get("SECRET_KEY", "change-me-in-vercel-secrets")
 
     def validate(self) -> None:
