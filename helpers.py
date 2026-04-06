@@ -60,8 +60,14 @@ def parse_telegram_link(link: str) -> tuple[int, int] | None:
     link = link.strip()
     match = re.match(r"https?://t\.me/c/(\d+)/(\d+)", link)
     if match:
-        channel_id = int(f"-100{match.group(1)}")
+        raw_id    = int(match.group(1))
         message_id = int(match.group(2))
+        # Short IDs (≤9 digits): -100 prefix (classic format)
+        # Long IDs (10+ digits): already full peer ID, just negate
+        if raw_id <= 999999999:
+            channel_id = int(f"-100{raw_id}")
+        else:
+            channel_id = -raw_id
         return channel_id, message_id
     return None
 
