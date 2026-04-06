@@ -215,6 +215,11 @@ async def _deliver_movie(client: Client, chat_id: int, content: dict) -> list[in
         parsed = parse_telegram_link(video_link)
         if parsed:
             from_chat_id, from_msg_id = parsed
+            # Peer resolve ဦးစွာ လုပ်ရမည် (session cache အတွက်)
+            try:
+                await client.get_chat(from_chat_id)
+            except Exception as e:
+                logger.warning(f"get_chat resolve failed: {e}")
             # Poster ပို့
             if poster_url:
                 try:
@@ -294,6 +299,11 @@ async def _deliver_series(client: Client, chat_id: int, content: dict) -> list[i
             parsed = parse_telegram_link(ep_link)
             if parsed:
                 from_chat_id, from_msg_id = parsed
+                # Peer resolve ဦးစွာ လုပ်ရမည်
+                try:
+                    await client.get_chat(from_chat_id)
+                except Exception:
+                    pass
                 delivered = False
                 for attempt in range(3):
                     try:
