@@ -165,6 +165,48 @@ async def handle_verify_callback(client: Client, cq: dict) -> None:
 # Content Delivery
 # ════════════════════════════════════════════════════════════════
 
+async def _bot_api_copy_message(
+    bot_token: str, chat_id: int, from_chat_id: int,
+    message_id: int, caption: str | None = None
+) -> int | None:
+    """
+    Bot API ကို တိုက်ရိုက် သုံးပြီး copy_message လုပ်သည်။
+    Pyrogram က handle မလုပ်နိုင်တဲ့ long channel IDs (10+ digits) အတွက် fallback။
+    """
+    import httpx
+    # Bot API format: -100{channel_id}
+    raw = str(abs(from_chat_id))
+    if not raw.startswith("100"):
+        from_chat_id_api = int(f"-100{raw}")
+    else:
+        from_chat_id_api = from_chat_id
+
+    payload: dict = {
+        "chat_id": chat_id,
+        "from_chat_id": from_chat_id_api,
+        "message_id": message_id,
+    }
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = "Markdown"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.post(
+                f"https://api.telegram.org/bot{bot_token}/copyMessage",
+                json=payload,
+            )
+            result = resp.json()
+            if result.get("ok"):
+                return result["result"]["message_id"]
+            else:
+                logger.warning(f"Bot API copyMessage failed: {result}")
+                return None
+    except Exception as e:
+        logger.warning(f"Bot API copyMessage exception: {e}")
+        return None
+
+
 async def _deliver_content(
     client: Client, chat_id: int, user_id: int, content: dict
 ) -> None:
@@ -215,20 +257,16 @@ async def _deliver_movie(client: Client, chat_id: int, content: dict) -> list[in
         parsed = parse_telegram_link(video_link)
         if parsed:
             from_chat_id, from_msg_id = parsed
-            # Peer resolve ဦးစွာ လုပ်ရမည် (session cache အတွက်)
-            try:
-                await client.get_chat(from_chat_id)
-            except Exception as e:
-                logger.warning(f"get_chat resolve failed: {e}")
             # Poster ပို့
             if poster_url:
                 try:
                     poster_msg = await client.send_photo(chat_id, photo=poster_url, caption=caption)
                     sent_ids.append(poster_msg.id)
-                    caption = ""  # copy_message မှာ caption ထပ်မထည့်
+                    caption = ""
                 except Exception:
                     pass
-            # Video copy
+            # Video copy — Pyrogram ကြိုးစား၊ fail ရင် Bot API သုံး
+            copied = False
             try:
                 sent = await client.copy_message(
                     chat_id=chat_id,
@@ -237,9 +275,20 @@ async def _deliver_movie(client: Client, chat_id: int, content: dict) -> list[in
                     caption=caption if caption else None,
                 )
                 sent_ids.append(sent.id)
+                copied = True
                 return sent_ids
             except Exception as e:
-                logger.warning(f"copy_message failed: {e}, falling back to button")
+                logger.warning(f"Pyrogram copy_message failed: {e}, trying Bot API")
+
+            if not copied:
+                msg_id = await _bot_api_copy_message(
+                    config.BOT_TOKEN, chat_id, from_chat_id, from_msg_id,
+                    caption if caption else None,
+                )
+                if msg_id:
+                    sent_ids.append(msg_id)
+                    return sent_ids
+                logger.warning("Bot API copy_message also failed, falling back to button")
 
     # External link — poster + button
     keyboard = InlineKeyboardMarkup([[
@@ -299,33 +348,40 @@ async def _deliver_series(client: Client, chat_id: int, content: dict) -> list[i
             parsed = parse_telegram_link(ep_link)
             if parsed:
                 from_chat_id, from_msg_id = parsed
-                # Peer resolve ဦးစွာ လုပ်ရမည်
-                try:
-                    await client.get_chat(from_chat_id)
-                except Exception:
-                    pass
+                ep_caption = f"📺 **{ep_name}** — {title}"
                 delivered = False
-                for attempt in range(3):
+                # Pyrogram ကြိုးစား
+                for attempt in range(2):
                     try:
                         sent = await client.copy_message(
                             chat_id=chat_id,
                             from_chat_id=from_chat_id,
                             message_id=from_msg_id,
-                            caption=f"📺 **{ep_name}** — {title}",
+                            caption=ep_caption,
                         )
                         sent_ids.append(sent.id)
                         delivered = True
                         break
                     except FloodWait as fw:
                         wait = fw.value + 2
-                        logger.warning(f"FloodWait {wait}s on {ep_name} (attempt {attempt+1}/3)")
+                        logger.warning(f"FloodWait {wait}s on {ep_name} (attempt {attempt+1})")
                         await asyncio.sleep(wait)
                     except Exception as e:
-                        logger.warning(f"copy_message failed for {ep_name}: {e}")
+                        logger.warning(f"Pyrogram copy failed for {ep_name}: {e}")
                         break
+
+                # Pyrogram fail → Bot API fallback
+                if not delivered:
+                    msg_id = await _bot_api_copy_message(
+                        config.BOT_TOKEN, chat_id, from_chat_id, from_msg_id, ep_caption
+                    )
+                    if msg_id:
+                        sent_ids.append(msg_id)
+                        delivered = True
+
                 if delivered:
-                    continue  # ✅ episode ပြီး — fallback မသွားဘဲ next episode
-                # 3 ကြိမ် retry လဲ fail → fallback to link button below
+                    continue  # ✅ next episode
+                # အကုန် fail → link button fallback below
 
         # External link or fallback
         keyboard = InlineKeyboardMarkup([[
