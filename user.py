@@ -293,19 +293,28 @@ async def _deliver_series(client: Client, chat_id: int, content: dict) -> list[i
             parsed = parse_telegram_link(ep_link)
             if parsed:
                 from_chat_id, from_msg_id = parsed
-                try:
-                    sent = await client.copy_message(
-                        chat_id=chat_id,
-                        from_chat_id=from_chat_id,
-                        message_id=from_msg_id,
-                        caption=f"📺 **{ep_name}** — {title}",
-                    )
-                    sent_ids.append(sent.id)
-                    continue
-                except FloodWait as fw:
-                    await asyncio.sleep(fw.value + 1)
-                except Exception as e:
-                    logger.warning(f"copy_message failed for {ep_name}: {e}")
+                delivered = False
+                for attempt in range(3):
+                    try:
+                        sent = await client.copy_message(
+                            chat_id=chat_id,
+                            from_chat_id=from_chat_id,
+                            message_id=from_msg_id,
+                            caption=f"📺 **{ep_name}** — {title}",
+                        )
+                        sent_ids.append(sent.id)
+                        delivered = True
+                        break
+                    except FloodWait as fw:
+                        wait = fw.value + 2
+                        logger.warning(f"FloodWait {wait}s on {ep_name} (attempt {attempt+1}/3)")
+                        await asyncio.sleep(wait)
+                    except Exception as e:
+                        logger.warning(f"copy_message failed for {ep_name}: {e}")
+                        break
+                if delivered:
+                    continue  # ✅ episode ပြီး — fallback မသွားဘဲ next episode
+                # 3 ကြိမ် retry လဲ fail → fallback to link button below
 
         # External link or fallback
         keyboard = InlineKeyboardMarkup([[
