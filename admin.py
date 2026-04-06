@@ -8,7 +8,6 @@ from pyrogram import Client
 
 from config import config
 from database import (
-    get_db,
     get_admin_state, set_admin_state, clear_admin_state,
     is_admin_logged_in, set_admin_session,
     add_storage_channel, remove_storage_channel, get_storage_channels,
@@ -16,6 +15,7 @@ from database import (
     create_content, get_content, update_content, delete_content,
     get_all_content, count_content, create_post,
     get_setting, set_setting,
+    get_bot_channels,
 )
 from keyboards import (
     kb_admin_main, kb_admin_cms, kb_admin_storage, kb_admin_forcesub,
@@ -903,50 +903,11 @@ async def _add_forcesub_channel_by_input(
 
 async def _get_bot_channels(client) -> list[dict]:
     """
-    Bot က admin ဖြစ်တဲ့ channels တွေကို list ထုတ်သည်။
-    MongoDB မှာ 5 မိနစ် cache သိမ်းထားသည် — get_dialogs() တိုင်း မခေါ်ဘဲ fast ဖြစ်မည်။
+    Bot က admin ဖြစ်တဲ့ channels တွေကို DB မှ ဖတ်သည်။
+    my_chat_member event မှတဆင့် bot promoted/demoted ဖြစ်တိုင်း auto-update ဖြစ်သည်။
+    get_dialogs() မသုံးတော့ (bots မှာ အလုပ်မလုပ်ဘူး)။
     """
-    from datetime import datetime, timedelta
-
-    # Cache check
-    try:
-        db = await get_db()
-        cache_doc = await db.settings.find_one({"key": "_channel_cache"})
-        if cache_doc:
-            cached_at = cache_doc.get("updated_at", datetime.min)
-            if datetime.utcnow() - cached_at < timedelta(minutes=5):
-                return cache_doc.get("value", [])
-    except Exception:
-        pass
-
-    # Cache miss — fetch fresh
-    channels = []
-    try:
-        async for dialog in client.get_dialogs():
-            chat = dialog.chat
-            if chat.type.name in ("CHANNEL", "SUPERGROUP"):
-                try:
-                    member = await client.get_chat_member(chat.id, "me")
-                    status = str(member.status).lower()
-                    if "admin" in status or "creator" in status:
-                        channels.append({"id": chat.id, "title": chat.title or str(chat.id)})
-                except Exception:
-                    pass
-    except Exception as e:
-        logger.warning(f"get_dialogs error: {e}")
-
-    # Save cache
-    try:
-        db = await get_db()
-        await db.settings.update_one(
-            {"key": "_channel_cache"},
-            {"$set": {"value": channels, "updated_at": datetime.utcnow()}},
-            upsert=True,
-        )
-    except Exception:
-        pass
-
-    return channels
+    return await get_bot_channels()
 
 
 async def _handle_post_channel_input(

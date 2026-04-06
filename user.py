@@ -13,6 +13,7 @@ from config import config
 from database import (
     get_setting, get_content, get_forcesub_channels,
     save_user_messages, get_user_messages_by_channel, delete_user_messages_record,
+    save_bot_channel, remove_bot_channel,
 )
 from crypto import decode_content_id
 from helpers import (
@@ -342,8 +343,26 @@ async def handle_chat_member_update(client: Client, update: dict) -> None:
     new_member  = member_data.get("new_chat_member", {})
     old_status  = old_member.get("status", "")
     new_status  = new_member.get("status", "")
+    chat        = member_data.get("chat", {})
+    channel_id  = chat.get("id")
+    channel_title = chat.get("title", str(channel_id))
 
-    # Leave/kick event မဟုတ်ရင် ignore
+    # ── Bot ကိုယ်တိုင်ရဲ့ status ပြောင်းလဲမှု (my_chat_member) ──
+    if "my_chat_member" in update:
+        new_user_id = new_member.get("user", {}).get("id")
+        bot_me = await client.get_me()
+        if new_user_id == bot_me.id:
+            if new_status == "administrator":
+                # Bot ကို admin ထည့်လိုက်တယ် → save
+                await save_bot_channel(channel_id, channel_title)
+                logger.info(f"Bot promoted to admin in {channel_title} ({channel_id})")
+            elif new_status in ("left", "kicked", "member"):
+                # Bot ကို ဖယ်/demote လိုက်တယ် → remove
+                await remove_bot_channel(channel_id)
+                logger.info(f"Bot removed/demoted from {channel_title} ({channel_id})")
+            return  # Bot ရဲ့ own status change — user flow ဆက်မလုပ်
+
+    # ── User leave/kick event ──
     if new_status not in ("left", "kicked", "banned"):
         return
     if old_status not in ("member", "creator", "administrator", "restricted"):

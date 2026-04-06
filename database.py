@@ -306,3 +306,29 @@ async def delete_user_messages_record(
     await db.user_messages.delete_many(
         {"user_id": user_id, "forcesub_channel_id": forcesub_channel_id}
     )
+
+# ════════════════════════════════════════════════════════════════
+# Bot Admin Channels (auto-tracked via my_chat_member)
+# ════════════════════════════════════════════════════════════════
+
+async def save_bot_channel(channel_id: int, channel_title: str) -> None:
+    """Bot ကို channel admin ထည့်လိုက်ရင် auto-save"""
+    db = await get_db()
+    await db.bot_channels.update_one(
+        {"channel_id": channel_id},
+        {"$set": {"channel_title": channel_title, "updated_at": datetime.utcnow()}},
+        upsert=True,
+    )
+
+
+async def remove_bot_channel(channel_id: int) -> None:
+    """Bot ကို channel မှ ဖယ်လိုက်ရင် auto-remove"""
+    db = await get_db()
+    await db.bot_channels.delete_one({"channel_id": channel_id})
+
+
+async def get_bot_channels() -> list[dict]:
+    """Bot က admin ဖြစ်တဲ့ channels အကုန် ဖတ်သည်"""
+    db = await get_db()
+    docs = await db.bot_channels.find().to_list(100)
+    return [{"id": d["channel_id"], "title": d["channel_title"]} for d in docs]
