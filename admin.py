@@ -984,27 +984,51 @@ async def _execute_post(
 
     watch_btn = kb_watch_now(content_hash, me.username)
 
-    try:
-        sent = await client.send_photo(
-            channel_id,
-            photo=content.get("poster_url", ""),
-            caption=caption,
-            reply_markup=watch_btn,
-        )
-        await create_post(content_id, channel_id, sent.id)
-        await clear_admin_state(user_id)
-        await client.edit_message_text(
-            chat_id, msg_id,
-            f"✅ **Post တင်ပြီးပါပြီ!**\n\n"
-            f"📢 Channel ID: `{channel_id}`\n"
-            f"🎬 Content: **{title}**\n"
-            f"🆔 Message ID: `{sent.id}`",
-            reply_markup=kb_admin_main(),
-        )
-    except Exception as e:
-        await client.edit_message_text(
-            chat_id, msg_id,
-            f"❌ **Post တင်မရပါ!**\n\nError: `{e}`\n\n"
-            "Bot ကို Channel Admin ထားထားမှ post တင်နိုင်ပါသည်。",
-            reply_markup=kb_admin_main(),
-        )
+    sent = None
+    poster_url = content.get("poster_url", "")
+
+    # Poster ပါ post တင်ကြည့်
+    if poster_url:
+        try:
+            sent = await client.send_photo(
+                channel_id,
+                photo=poster_url,
+                caption=caption,
+                reply_markup=watch_btn,
+            )
+        except Exception as e:
+            logger.warning(f"send_photo failed ({e}), falling back to text post")
+
+    # Poster fail ဖြစ်ရင် text post fallback
+    if sent is None:
+        try:
+            sent = await client.send_message(
+                channel_id,
+                caption,
+                reply_markup=watch_btn,
+            )
+        except Exception as e:
+            await client.edit_message_text(
+                chat_id, msg_id,
+                f"❌ **Post တင်မရပါ!**\n\nError: `{e}`\n\n"
+                "Bot ကို Channel Admin ထားထားမှ post တင်နိုင်ပါသည်။",
+                reply_markup=kb_admin_main(),
+            )
+            return
+
+    await create_post(content_id, channel_id, sent.id)
+    await clear_admin_state(user_id)
+
+    # Poster fail ဖြစ်ရင် admin ကို warn ပြ
+    poster_warn = ""
+    if poster_url and "send_photo" not in str(type(sent)):
+        poster_warn = "\n⚠️ Poster URL မသင့်တော်သဖြင့် text only post တင်ခဲ့သည်။"
+
+    await client.edit_message_text(
+        chat_id, msg_id,
+        f"✅ **Post တင်ပြီးပါပြီ!**\n\n"
+        f"📢 Channel ID: `{channel_id}`\n"
+        f"🎬 Content: **{title}**\n"
+        f"🆔 Message ID: `{sent.id}`{poster_warn}",
+        reply_markup=kb_admin_main(),
+    )
